@@ -1,5 +1,5 @@
 ---
-slug: forge-memory
+slug: forge-memory-user-88546431
 displayName: Forge Memory
 version: 0.3.1
 summary: 项目记忆层，负责项目认知和上下文供给，支持分支隔离、Git 历史、影响分析和 SQLite 索引。
