@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from .utils import ROLE_LABELS, stable_id
+from .utils import ROLE_LABELS, branch_context_path, current_branch, stable_id
 
 
 # 中文→英文 常见开发术语映射（用于跨语言关键词匹配）
@@ -222,7 +222,8 @@ def generate_context_pack(
     entry_files: list[str] | None = None,
 ) -> str:
     """生成上下文包 Markdown。"""
-    context = root / ".project-context"
+    branch = current_branch(root)
+    context = branch_context_path(root, branch)
     keywords = _extract_keywords(task)
     # 提取英文原始关键词（用于加权评分）
     en_keywords = set(re.findall(r"[a-zA-Z_][\w]*", task.lower()))
@@ -303,7 +304,39 @@ def generate_context_pack(
         lines.append("- 未找到明显相关模块。")
 
     lines.extend(["", "## Recent Changes", ""])
-    lines.append("- v0.1 不包含 Git 历史分析；近期变更将在 v0.3 中提供。")
+    # 读取 commits.jsonl 获取近期涉及相关文件的 commit
+    commits_path = context / "index" / "commits.jsonl"
+    commit_files_path = context / "index" / "commit_files.jsonl"
+    if commits_path.exists() and commit_files_path.exists():
+        related_paths = {f["path"] for f in related_files}
+        commits_data = {}
+        for line in commits_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    c = json.loads(line)
+                    commits_data[c["hash"]] = c
+                except json.JSONDecodeError:
+                    continue
+        relevant_hashes: set[str] = set()
+        for line in commit_files_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    cf = json.loads(line)
+                    if cf["file_path"] in related_paths:
+                        relevant_hashes.add(cf["commit_hash"])
+                except json.JSONDecodeError:
+                    continue
+        relevant_commits = sorted(
+            [commits_data[h] for h in relevant_hashes if h in commits_data],
+            key=lambda c: c.get("date", ""), reverse=True,
+        )[:10]
+        if relevant_commits:
+            for c in relevant_commits:
+                lines.append(f"- `{c['short_hash']}` {c['date'][:10]} {c['message']}")
+        else:
+            lines.append("- 未找到与相关文件匹配的近期 commit。")
+    else:
+        lines.append("- 未找到 Git 历史数据。请运行 forge-memory scan。")
 
     lines.extend(["", "## Dependency / Impact", ""])
     if import_heavy:

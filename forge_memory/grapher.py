@@ -42,9 +42,9 @@ def render_graph(scan_result: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_graph(root: Path, scan_result: dict) -> None:
+def write_graph(root: Path, scan_result: dict, branch_dir: Path | None = None) -> None:
     """写出 graph/nodes.jsonl、graph/edges.jsonl、graph/graph.md、graph/mermaid.md。"""
-    graph_dir = root / ".project-context" / "graph"
+    graph_dir = (branch_dir or root / ".project-context") / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
 
     write_jsonl(graph_dir / "nodes.jsonl", scan_result["nodes"])

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 from .utils import (
+    branch_context_path,
+    current_branch,
     generated_md,
     has_project_signal,
     now_iso,
@@ -33,8 +35,10 @@ def initialize(root: Path, allow_empty_root: bool = False) -> list[Path]:
         raise ValueError("未发现明显项目信号；如确认这是项目根目录，请添加 --allow-empty-root。")
 
     context = root / ".project-context"
+    branch = current_branch(root)
+    branch_dir = branch_context_path(root, branch)
     created: list[Path] = []
-    for child in [context, context / "sessions"]:
+    for child in [context, context / "sessions", branch_dir, branch_dir / "index", branch_dir / "graph", branch_dir / "scans", branch_dir / "packs"]:
         if not child.exists():
             child.mkdir(parents=True, exist_ok=True)
             created.append(child)
@@ -46,6 +50,7 @@ def initialize(root: Path, allow_empty_root: bool = False) -> list[Path]:
         "schema_version": SCHEMA_VERSION,
         "project_id": project_id,
         "project_root": str(root),
+        "active_branch": branch,
         "created_at": timestamp,
         "updated_at": timestamp,
         "generator": GENERATOR,

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 from collections import defaultdict
 from pathlib import Path
@@ -17,7 +19,9 @@ from .utils import (
     LANG_BY_SUFFIX,
     ROLE_LABELS,
     SYMBOL_PATTERNS,
+    branch_context_path,
     content_hash,
+    current_branch,
     is_text_file,
     now_iso,
     read_text,
@@ -25,6 +29,49 @@ from .utils import (
     slugify,
     stable_id,
 )
+
+
+def migrate_to_branch_structure(root: Path) -> str:
+    """检测旧结构并迁移到 branches/<branch>/。返回当前分支名。"""
+    context = root / ".project-context"
+    branch = current_branch(root)
+    branch_dir = branch_context_path(root, branch)
+
+    # 检查旧结构是否存在
+    old_index = context / "index"
+    old_graph = context / "graph"
+    old_scans = context / "scans"
+    old_packs = context / "packs"
+
+    if not old_index.exists() and not old_graph.exists() and not old_scans.exists():
+        # 无旧结构，确保分支目录存在
+        for subdir in ["index", "graph", "scans", "packs"]:
+            (branch_dir / subdir).mkdir(parents=True, exist_ok=True)
+        return branch
+
+    # 迁移旧结构到分支目录
+    branch_dir.mkdir(parents=True, exist_ok=True)
+    for old_dir, subdir in [(old_index, "index"), (old_graph, "graph"), (old_scans, "scans"), (old_packs, "packs")]:
+        if old_dir.exists():
+            target = branch_dir / subdir
+            if target.exists():
+                # 合并：移动旧文件到分支目录（不覆盖已有）
+                for item in old_dir.iterdir():
+                    dest = target / item.name
+                    if not dest.exists():
+                        shutil.move(str(item), str(dest))
+                old_dir.rmdir()
+            else:
+                shutil.move(str(old_dir), str(target))
+
+    # 更新 context.json
+    ctx_path = context / "context.json"
+    if ctx_path.exists():
+        ctx = json.loads(ctx_path.read_text(encoding="utf-8"))
+        ctx["active_branch"] = branch
+        ctx_path.write_text(json.dumps(ctx, indent=2) + "\n", encoding="utf-8")
+
+    return branch
 
 
 def classify_file(path: Path) -> str:

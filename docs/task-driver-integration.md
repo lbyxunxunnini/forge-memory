@@ -1,6 +1,6 @@
 # Task Driver Integration
 
-Forge Memory 与任务驱动框架的第一集成点是计划阶段。
+Forge Memory 与任务驱动框架的集成点是计划阶段（v0.4）。
 
 ## 集成目标
 

@@ -10,7 +10,7 @@ from .utils import now_iso
 
 
 def read_existing_index(context: Path) -> dict[str, dict]:
-    """读取已有的 index/files.jsonl，返回 {path: record} 字典。"""
+    """读取已有的 index/files.jsonl，返回 {path: record} 字典。支持分支子目录。"""
     index_path = context / "index" / "files.jsonl"
     if not index_path.exists():
         return {}
@@ -28,9 +28,9 @@ def read_existing_index(context: Path) -> dict[str, dict]:
     return result
 
 
-def write_index(root: Path, scan_result: dict) -> None:
+def write_index(root: Path, scan_result: dict, branch_dir: Path | None = None) -> None:
     """写出 index/files.jsonl 和 index/modules.jsonl。"""
-    index_dir = root / ".project-context" / "index"
+    index_dir = (branch_dir or root / ".project-context") / "index"
     index_dir.mkdir(parents=True, exist_ok=True)
 
     # files.jsonl
@@ -80,9 +80,9 @@ def write_index(root: Path, scan_result: dict) -> None:
     )
 
 
-def write_scan_summary(root: Path, scan_result: dict) -> None:
+def write_scan_summary(root: Path, scan_result: dict, branch_dir: Path | None = None) -> None:
     """写出 scans/latest.json 和追加 scans/history.jsonl。"""
-    scans_dir = root / ".project-context" / "scans"
+    scans_dir = (branch_dir or root / ".project-context") / "scans"
     scans_dir.mkdir(parents=True, exist_ok=True)
 
     # 生成 scan_id

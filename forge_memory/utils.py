@@ -1,9 +1,10 @@
-"""Forge Memory 工具函数：ID 生成、排除规则、路径工具、content_hash 计算。"""
+"""Forge Memory 工具函数：ID 生成、排除规则、路径工具、content_hash 计算、分支路径解析。"""
 
 from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -174,3 +175,39 @@ def safe_to_overwrite(path: Path) -> bool:
     if GENERATED_MARKER in text:
         return True
     return any(snippet in text for snippet in PLACEHOLDER_SNIPPETS)
+
+
+# --- 分支路径工具 ---
+
+def current_branch(root: Path) -> str:
+    """返回当前 git 分支名，非 git 仓库返回 'default'。"""
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=root, capture_output=True, text=True, timeout=5,
+        )
+        branch = result.stdout.strip()
+        if branch:
+            return branch
+        # detached HEAD fallback
+        result2 = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root, capture_output=True, text=True, timeout=5,
+        )
+        sha = result2.stdout.strip()
+        return f"detached-{sha}" if sha else "default"
+    except (OSError, subprocess.TimeoutExpired):
+        return "default"
+
+
+def sanitize_branch_name(branch: str) -> str:
+    """将分支名转为安全目录名（/ → _），限制 64 字符。"""
+    safe = branch.replace("/", "_").replace("\\", "_").replace(":", "_")
+    # 移除不安全字符
+    safe = re.sub(r"[^\w.\-]", "_", safe)
+    return safe[:64] or "unknown"
+
+
+def branch_context_path(root: Path, branch: str) -> Path:
+    """返回 .project-context/branches/<branch>/ 路径。"""
+    return root / ".project-context" / "branches" / sanitize_branch_name(branch)

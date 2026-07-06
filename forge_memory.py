@@ -9,13 +9,17 @@ import sys
 from pathlib import Path
 
 from forge_memory.context_pack import generate_context_pack
+from forge_memory.git_history import append_new_commits, is_git_stale, scan_git_history
 from forge_memory.grapher import write_graph
+from forge_memory.impact import analyze_impact, format_impact
+from forge_memory.sqlite_backend import import_jsonl_to_sqlite
 from forge_memory.indexer import read_existing_index, write_index, write_scan_summary
 from forge_memory.init import initialize
 from forge_memory.renderer import render_full_summary
-from forge_memory.scanner import scan
+from forge_memory.scanner import migrate_to_branch_structure, scan
 from forge_memory.session import add_session, list_sessions
 from forge_memory.status import get_status
+from forge_memory.utils import branch_context_path, current_branch
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -48,13 +52,17 @@ def cmd_scan(args: argparse.Namespace) -> int:
             print(f"错误：{e}", file=sys.stderr)
             return 1
 
+    # 迁移旧结构到分支子目录
+    branch = migrate_to_branch_structure(root)
+    branch_dir = branch_context_path(root, branch)
+
     # 读取已有索引用于增量扫描
-    existing_index = read_existing_index(context) if not args.force else {}
+    existing_index = read_existing_index(branch_dir) if not args.force else {}
 
     result = scan(root, args.max_file_bytes, existing_index)
-    write_index(root, result)
-    write_scan_summary(root, result)
-    write_graph(root, result)
+    write_index(root, result, branch_dir)
+    write_scan_summary(root, result, branch_dir)
+    write_graph(root, result, branch_dir)
 
     # 写入 project-summary.md
     from forge_memory.utils import generated_md, safe_to_overwrite
@@ -71,14 +79,22 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if ctx_path.exists():
         ctx = json.loads(ctx_path.read_text(encoding="utf-8"))
         ctx["updated_at"] = result["scanned_at"]
+        ctx["active_branch"] = branch
         ctx_path.write_text(json.dumps(ctx, indent=2) + "\n", encoding="utf-8")
 
+    # Git 历史扫描
+    git_result = scan_git_history(root)
+    new_commits = append_new_commits(branch_dir, git_result["commits"], git_result["commit_files"])
+
     print(f"已扫描项目：{root}")
+    print(f"当前分支：{branch}")
+    print(f"索引目录：{branch_dir}")
     print(f"已索引文件：{len(result['files'])}")
     print(f"已索引模块：{len(result['modules'])}")
     print(f"图谱节点：{len(result['nodes'])}")
     print(f"图谱关系：{len(result['edges'])}")
     print(f"变更文件：{result['changed_files']}，未变：{result['unchanged_files']}，新增：{result['new_files']}，删除：{result['deleted_files']}")
+    print(f"Git commit：{len(git_result['commits'])} 个（新增 {new_commits}）")
     return 0
 
 
@@ -87,9 +103,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     status = get_status(root)
     if status.get("status") == "未扫描":
         print(f"项目：{status['project_name']}")
+        print(f"分支：{status['branch']}")
         print(f"状态：{status['message']}")
         return 0
     print(f"项目：{status['project_name']}")
+    print(f"分支：{status['branch']}")
     print(f"状态：{status['status']}")
     print(f"最后扫描：{status['last_scan']}")
     print(f"扫描 ID：{status['scan_id']}")
@@ -99,21 +117,62 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"未变文件：{status['unchanged_files']}")
     print(f"新增文件：{status['new_files']}")
     print(f"删除文件：{status['deleted_files']}")
+    print(f"Commit 数：{status.get('commit_count', 0)}")
     return 0
 
 
 def cmd_context(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
+    branch = current_branch(root)
+    branch_dir = branch_context_path(root, branch)
     entry_files = args.entry if args.entry else None
     pack = generate_context_pack(root, args.task, entry_files)
 
-    packs_dir = root / ".project-context" / "packs"
+    packs_dir = branch_dir / "packs"
     packs_dir.mkdir(parents=True, exist_ok=True)
     pack_path = packs_dir / "latest-context-pack.md"
     pack_path.write_text(pack, encoding="utf-8")
 
     print(f"已生成上下文包：{pack_path}")
     print(pack)
+    return 0
+
+
+def cmd_import_db(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    branch = args.branch or current_branch(root)
+    context = root / ".project-context"
+    branch_dir = branch_context_path(root, branch)
+
+    if not (branch_dir / "index" / "files.jsonl").exists():
+        print(f"错误：未找到分支 {branch} 的索引，请先运行 scan。", file=sys.stderr)
+        return 1
+
+    db_path, counts = import_jsonl_to_sqlite(branch_dir, branch)
+    print(f"已导入 SQLite：{db_path}")
+    for table, count in counts.items():
+        print(f"  {table}: {count} 行")
+    return 0
+
+
+def cmd_impact(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    branch = current_branch(root)
+    branch_dir = branch_context_path(root, branch)
+
+    if not (branch_dir / "index" / "files.jsonl").exists():
+        print(f"错误：未找到分支 {branch} 的索引，请先运行 scan。", file=sys.stderr)
+        return 1
+
+    # 过期检测：自动更新 git 历史
+    if is_git_stale(branch_dir, root):
+        print(f"检测到新 commit，自动更新 git 历史...")
+        git_result = scan_git_history(root)
+        new_commits = append_new_commits(branch_dir, git_result["commits"], git_result["commit_files"])
+        print(f"已更新：{new_commits} 个新 commit")
+
+    result = analyze_impact(root, args.file_path, branch_dir)
+    print(format_impact(result))
     return 0
 
 
@@ -186,6 +245,16 @@ def main() -> int:
     p_context.add_argument("--task", required=True, help="任务描述")
     p_context.add_argument("--entry", nargs="*", help="入口文件路径")
 
+    # impact
+    p_impact = subparsers.add_parser("impact", help="文件影响分析")
+    p_impact.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+    p_impact.add_argument("file_path", help="要分析的文件路径")
+
+    # import-db
+    p_import_db = subparsers.add_parser("import-db", help="导入 JSONL 到 SQLite")
+    p_import_db.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+    p_import_db.add_argument("--branch", help="指定分支（默认当前分支）")
+
     # session
     p_session = subparsers.add_parser("session", help="会话记忆管理")
     session_sub = p_session.add_subparsers(dest="session_command", help="会话子命令")
@@ -216,6 +285,10 @@ def main() -> int:
         return cmd_status(args)
     elif args.command == "context":
         return cmd_context(args)
+    elif args.command == "impact":
+        return cmd_impact(args)
+    elif args.command == "import-db":
+        return cmd_import_db(args)
     elif args.command == "session":
         if args.session_command == "add":
             return cmd_session_add(args)
