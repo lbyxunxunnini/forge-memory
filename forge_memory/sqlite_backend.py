@@ -101,8 +101,17 @@ def import_jsonl_to_sqlite(context: Path, branch: str) -> str:
         branch_dir = branch_context_path(root, branch)
 
     db_path = branch_dir / "forge-memory.db"
+    # 备份旧文件
+    if db_path.exists():
+        import shutil
+        backup_path = db_path.with_suffix(".db.bak")
+        shutil.copy2(str(db_path), str(backup_path))
+
     conn = sqlite3.connect(str(db_path))
     conn.executescript(SCHEMA_SQL)
+
+    # 事务保护：全部成功才提交，失败则回滚
+    conn.execute("BEGIN TRANSACTION")
 
     # 清空现有数据
     for table in ["files", "modules", "commits", "commit_files", "nodes", "edges"]:

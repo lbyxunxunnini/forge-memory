@@ -21,6 +21,44 @@ def _load_jsonl(path: Path) -> list[dict]:
     return result
 
 
+def target_path_stem(file_path: str) -> str:
+    """返回文件路径去掉扩展名的部分，如 lib/foo/bar.dart → lib/foo/bar"""
+    return file_path.rsplit(".", 1)[0] if "." in file_path.rsplit("/", 1)[-1] else file_path
+
+
+def _import_matches_file(import_path: str, file_path: str, file_stem: str) -> bool:
+    """判断 import 路径是否指向指定文件。
+
+    匹配规则：
+    1. package:foo/lib/path → 去掉 package:foo/ 后与 file_stem 比较
+    2. 相对路径 ../path → 用文件名末段匹配
+    3. 以上都不匹配时返回 False（不再用子串匹配）
+    """
+    if not file_stem:
+        return False
+
+    # 去掉引号和分号
+    imp = import_path.strip("'\"").rstrip(";").strip()
+
+    # Dart package import: package:foo/bar.dart → lib/bar
+    if imp.startswith("package:"):
+        parts = imp.split("/", 1)
+        if len(parts) == 2:
+            pkg_stem = parts[1].rsplit(".", 1)[0] if "." in parts[1].rsplit("/", 1)[-1] else parts[1]
+            # Dart: package:foo/path → lib/path
+            return pkg_stem == file_stem or ("lib/" + pkg_stem) == file_stem
+
+    # 相对路径：用文件名末段匹配
+    imp_name = imp.rsplit("/", 1)[-1].rsplit(".", 1)[0] if "/" in imp else imp.rsplit(".", 1)[0]
+    file_name = file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if imp_name and file_name and imp_name == file_name:
+        return True
+
+    # 绝对路径匹配（import 路径去掉扩展名 == file_stem）
+    imp_stem = imp.rsplit(".", 1)[0] if "." in imp.rsplit("/", 1)[-1] else imp
+    return imp_stem == file_stem
+
+
 def _module_of(file_path: str) -> str:
     """从文件路径推断模块（目录部分）。"""
     parts = file_path.split("/")
@@ -53,23 +91,21 @@ def analyze_impact(root: Path, file_path: str, context: Path) -> dict:
 
     # 直接导入：找到 import 了目标文件的其他文件
     direct_importers = []
+    target_stem = target_path_stem(file_path)
     for f in files:
         if f["path"] == file_path:
             continue
         for imp in f.get("imports", []):
-            # 简化匹配：import 路径包含目标文件名（去掉扩展名）
-            target_name = file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-            if target_name in imp:
+            if _import_matches_file(imp, file_path, target_stem):
                 direct_importers.append(f["path"])
                 break
 
     # 直接依赖：目标文件 import 的其他文件
     direct_deps = []
     for imp in target.get("imports", []):
-        # 尝试匹配已有文件
         for f in files:
-            name = f["path"].rsplit("/", 1)[-1].rsplit(".", 1)[0]
-            if name and name in imp:
+            f_stem = target_path_stem(f["path"])
+            if _import_matches_file(imp, f["path"], f_stem):
                 direct_deps.append(f["path"])
                 break
 
