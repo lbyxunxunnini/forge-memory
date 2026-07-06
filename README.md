@@ -1,5 +1,7 @@
 # Forge Memory
 
+GitHub: lbyxunxunnini/forge-memory · License: MIT · 当前版本：**v0.1.0**
+
 Forge Memory 是面向研发智能体的本地项目记忆层。第一版不做服务器、不做数据库、不做复杂向量检索，先用项目内静态索引把“项目全貌、文件事实、轻量关系、上下文包”稳定提供给任务驱动框架和其他智能体。
 
 核心目标：

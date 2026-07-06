@@ -1,0 +1,5 @@
+{
+  "name": "forge-memory",
+  "description": "管理项目本地记忆 .project-context，用于初始化、扫描、读取结构化摘要、恢复会话记忆和生成 JSONL 静态索引。",
+  "version": "v0.1.0"
+}
