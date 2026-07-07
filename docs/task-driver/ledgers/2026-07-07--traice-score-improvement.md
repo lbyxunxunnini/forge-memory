@@ -283,7 +283,7 @@ grep -c "快速开始" README.md
 
 ### Delivery Acknowledged By User
 
-pending
+accepted_by_user
 
 ### Quality Score
 
