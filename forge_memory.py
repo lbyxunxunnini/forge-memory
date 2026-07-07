@@ -164,6 +164,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"  索引新鲜度：{health.get('index_freshness', 'unknown')} ({health.get('index_age_hours', 'N/A')} 小时)")
         print(f"  Hash 覆盖率：{health.get('hash_coverage', 'N/A')}")
 
+    # 质量评分
+    grade = status.get("quality_grade", "")
+    if grade:
+        print(f"\n质量评分：{grade}")
+    advice = status.get("rescan_advice", "")
+    if advice:
+        print(f"建议：{advice}")
+
     return 0
 
 

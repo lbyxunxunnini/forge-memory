@@ -75,6 +75,32 @@ def _calculate_health(data: dict, branch_dir: Path, root: Path) -> dict:
     return health
 
 
+def _grade_from_health(health: dict) -> str:
+    """根据健康度指标计算质量评分 A/B/C/D。"""
+    # 文件覆盖率
+    cov_str = health.get("file_coverage", "N/A")
+    if cov_str == "N/A":
+        coverage = 0.0
+    else:
+        coverage = float(cov_str.rstrip("%")) / 100
+
+    # 索引新鲜度
+    freshness = health.get("index_freshness", "unknown")
+    fresh_score = 2 if freshness == "fresh" else 1 if freshness == "stale" else 0
+
+    # hash 覆盖率
+    hash_str = health.get("hash_coverage", "N/A")
+    if hash_str == "N/A":
+        hash_cov = 0.0
+    else:
+        hash_cov = float(hash_str.rstrip("%")) / 100
+
+    cov_score = 2 if coverage >= 0.8 else 1 if coverage >= 0.5 else 0
+    hash_score = 2 if hash_cov >= 0.9 else 1 if hash_cov >= 0.6 else 0
+    total = cov_score + fresh_score + hash_score
+    return "A" if total >= 5 else "B" if total >= 3 else "C" if total >= 1 else "D"
+
+
 def get_status(root: Path) -> dict:
     """返回项目扫描状态。"""
     context = root / ".project-context"
@@ -110,6 +136,12 @@ def get_status(root: Path) -> dict:
     # 计算健康度
     health = _calculate_health(data, branch_dir, root)
 
+    # 质量评分
+    quality_grade = _grade_from_health(health)
+    rescan_advice = ""
+    if quality_grade in ("C", "D"):
+        rescan_advice = f"质量评分为 {quality_grade}，建议运行 forge-memory scan 更新索引后重新生成上下文包。"
+
     return {
         "project_name": root.name,
         "branch": branch,
@@ -124,4 +156,6 @@ def get_status(root: Path) -> dict:
         "deleted_files": data.get("deleted_files", 0),
         "commit_count": commit_count,
         "health": health,
+        "quality_grade": quality_grade,
+        "rescan_advice": rescan_advice,
     }
