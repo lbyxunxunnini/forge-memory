@@ -1,7 +1,7 @@
 ---
 slug: forge-memory-user-88546431
 displayName: Forge Memory
-version: 0.4.1
+version: 0.4.2
 summary: 让 AI 编程助手记住你的项目。三条命令初始化，之后 AI 自动理解项目结构、找到相关文件、知道最近改了什么。支持多分支隔离、会话记忆恢复、质量评分和一键诊断。
 tags: [memory, project, context, workflow, index]
 license: MIT
