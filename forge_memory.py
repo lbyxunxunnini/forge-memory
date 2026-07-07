@@ -41,6 +41,79 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- 噪声置信度排查 ---
+
+# 已知噪声目录模式（后缀或全名匹配）
+_NOISE_PATTERNS = {
+    "cache", "temp", "tmp", "output", "generated", "artifacts",
+    "coverage", "logs", "log", "snapshots", ".gradle", ".cxx",
+}
+
+# 标准项目结构目录（不算噪声）
+_STANDARD_DIRS = {
+    "src", "lib", "app", "test", "tests", "spec", "specs",
+    "docs", "doc", "scripts", "bin", "cmd", "pkg", "internal",
+    "api", "config", "conf", "public", "static", "assets",
+    "resources", "res", "tools", "utils", "util", "common",
+    "shared", "core", "models", "views", "controllers", "routes",
+    "services", "handlers", "middleware", "plugins", "modules",
+    "components", "pages", "layouts", "styles", "css", "scss",
+    "fonts", "images", "img", "icons", "locales", "i18n",
+    "migrations", "seeds", "fixtures", "mocks", "stubs",
+    "android", "ios", "ohos", "linux", "windows", "macos", "web",
+}
+
+
+def _check_noise(root: Path, result: dict) -> None:
+    """初始化扫描后，检测可能的噪声目录并输出警告。"""
+    from collections import Counter
+
+    # 统计每个顶层目录的文件数
+    top_dir_counts: Counter[str] = Counter()
+    for f in result["files"]:
+        parts = f["path"].split("/")
+        if len(parts) > 1:
+            top_dir_counts[parts[0]] += 1
+
+    total_files = len(result["files"])
+    if total_files == 0:
+        return
+
+    # 识别可能的噪声目录
+    suspects: list[tuple[str, int, str]] = []  # (dir, count, reason)
+    for d, count in top_dir_counts.items():
+        d_lower = d.lower()
+        # 已知噪声模式
+        if d_lower in _NOISE_PATTERNS or any(
+            d_lower.endswith(s) for s in _NOISE_PATTERNS
+        ):
+            suspects.append((d, count, "匹配已知噪声模式"))
+        # 非标准目录且文件数占比超过 15%
+        elif d not in _STANDARD_DIRS and count / total_files > 0.15:
+            suspects.append((d, count, f"非常规目录，占文件总数 {count / total_files:.0%}"))
+
+    if not suspects:
+        return
+
+    # 计算置信度
+    suspect_files = sum(c for _, c, _ in suspects)
+    ratio = suspect_files / total_files
+    if ratio > 0.5:
+        confidence = "高"
+    elif ratio > 0.3:
+        confidence = "中"
+    else:
+        confidence = "低"
+
+    print("\n--- 噪声置信度排查 ---")
+    print(f"置信度：{confidence}（疑似噪声文件 {suspect_files}/{total_files}）")
+    for d, count, reason in suspects:
+        print(f"  {d}/  —  {count} 个文件，原因：{reason}")
+    print()
+    print("提示：这些目录可能包含缓存、构建产物或依赖，不影响核心代码理解。")
+    print(f"如需排除，请将目录名添加到 {root / '.forgeignore'} 或在扫描后手动清理 project-summary.md。")
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
     context = root / ".project-context"
@@ -122,6 +195,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
             shutil.rmtree(backup_dir)
         except OSError:
             pass
+
+    # 初始化扫描时，执行噪声置信度排查
+    is_init_scan = existing_index == {}
+    if is_init_scan:
+        _check_noise(root, result)
 
     print(f"已扫描项目：{root}")
     print(f"当前分支：{branch}")

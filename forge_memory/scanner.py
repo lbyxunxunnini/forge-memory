@@ -359,7 +359,7 @@ def scan(
     for current, dirnames, filenames in os.walk(root):
         current_path = Path(current)
         dirnames[:] = sorted(
-            d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith(".tmp")
+            d for d in dirnames if not d.startswith(".") and d not in EXCLUDE_DIRS
         )
         filenames = sorted(filenames)
 

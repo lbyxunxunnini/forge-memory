@@ -12,14 +12,24 @@ from pathlib import Path
 # --- 排除规则 ---
 
 EXCLUDE_DIRS = {
+    # VCS
     ".git", ".hg", ".svn",
+    # forge-memory 自身输出
     ".project-context",
-    ".venv", "venv",
+    # Python
+    ".venv", "venv", "__pycache__",
+    # Node / JS
     "node_modules", "vendor",
+    # 构建产物
     "dist", "build", "out", "target", ".next", ".cache",
-    "__pycache__",
-    ".dart_tool", ".gradle", ".cxx",
-    ".trae", ".cursor", ".vscode", ".idea",
+    # Dart / Flutter
+    ".dart_tool", ".fvm", ".pub-cache",
+    # Android / Gradle / NDK
+    ".gradle", ".cxx",
+    # HarmonyOS
+    "oh_modules", ".hvigor", ".ohpm",
+    # IDE / 编辑器
+    ".trae", ".cursor", ".vscode", ".idea", ".fleet",
 }
 
 EXCLUDE_SUFFIXES = {
