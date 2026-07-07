@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.4.1 (2026-07-07)
+
+Agent PM 产品评审驱动的改进，评分从 4.0 提升至 4.5。
+
+### 新增
+- 上下文包质量评分：`_compute_quality_grade` 函数，基于文件覆盖率/索引新鲜度/Hash 覆盖率计算 A/B/C/D 评分
+- 会话恢复异常处理：定义文件损坏、摘要过时、index 与文件不一致的检测和回退路径
+- doctor 输出 schema：在 `references/schema.md` 中定义 doctor 命令的 JSON 输出结构
+
+### 变更
+- SKILL.md 自动触发条件细化：明确"已获得授权"为同一会话显式激活即授权
+- SKILL.md 自动触发条件合并冗余条目
+- schema.md 目录结构更新为 `branches/<分支名>/` 分支隔离布局，补充 commits/commit_files/db
+- workflow.md 触发前提改为指向 SKILL.md 触发纪律章节，消除文档矛盾
+- SKILL.md 脚本部分补充 doctor 命令
+- 评分提升计划：从 TRAICE 框架切换到三方评估法 14 维度，目标 4.8
+
 ## v0.4.0 (2026-07-07)
 
 TRAICE 评分提升计划全部完成，25 项改进。

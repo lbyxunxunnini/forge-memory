@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -149,6 +150,75 @@ def _extract_keywords(task: str) -> list[str]:
             keywords.append(kw)
 
     return keywords
+
+
+def _compute_quality_grade(context: Path, root: Path) -> dict:
+    """计算上下文包质量评分。返回 {grade, coverage, freshness, hash_coverage, reasons}。"""
+    from datetime import datetime, timezone
+
+    # 文件覆盖率
+    indexed = 0
+    files_path = context / "index" / "files.jsonl"
+    if files_path.exists():
+        indexed = sum(1 for l in files_path.read_text(encoding="utf-8").splitlines() if l.strip())
+    actual = 0
+    from .utils import EXCLUDE_DIRS, EXCLUDE_SUFFIXES
+    for current, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            if Path(fn).suffix.lower() not in EXCLUDE_SUFFIXES:
+                actual += 1
+    coverage = indexed / max(actual, 1)
+
+    # 索引新鲜度
+    freshness_hours = 9999.0
+    latest_path = context / "scans" / "latest.json"
+    if latest_path.exists():
+        try:
+            data = json.loads(latest_path.read_text(encoding="utf-8"))
+            scan_time = datetime.fromisoformat(data["finished_at"].replace("Z", "+00:00"))
+            freshness_hours = (datetime.now(timezone.utc) - scan_time).total_seconds() / 3600
+        except (KeyError, ValueError, TypeError):
+            pass
+
+    # hash 覆盖率
+    total_f = 0
+    with_hash = 0
+    if files_path.exists():
+        for line in files_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    f = json.loads(line)
+                    total_f += 1
+                    if f.get("content_hash"):
+                        with_hash += 1
+                except json.JSONDecodeError:
+                    continue
+    hash_cov = with_hash / max(total_f, 1)
+
+    # 评分
+    cov_score = 2 if coverage >= 0.8 else 1 if coverage >= 0.5 else 0
+    fresh_score = 2 if freshness_hours < 24 else 1 if freshness_hours < 168 else 0
+    hash_score = 2 if hash_cov >= 0.9 else 1 if hash_cov >= 0.6 else 0
+    total_score = cov_score + fresh_score + hash_score
+
+    grade = "A" if total_score >= 5 else "B" if total_score >= 3 else "C" if total_score >= 1 else "D"
+
+    reasons = []
+    reasons.append(f"文件覆盖率 {coverage:.0%} ({indexed}/{actual})")
+    if freshness_hours < 9999:
+        reasons.append(f"索引新鲜度 {freshness_hours:.0f}h")
+    else:
+        reasons.append("索引新鲜度 未知")
+    reasons.append(f"Hash 覆盖率 {hash_cov:.0%}")
+
+    return {
+        "grade": grade,
+        "coverage": round(coverage, 2),
+        "freshness_hours": round(freshness_hours, 1),
+        "hash_coverage": round(hash_cov, 2),
+        "reasons": reasons,
+    }
 
 
 def _read_index(context: Path) -> tuple[list[dict], list[dict]]:
@@ -307,6 +377,9 @@ def generate_context_pack(
 
     confidence = {"overall": confidence, "reasons": confidence_reasons}
 
+    # 质量评分
+    quality = _compute_quality_grade(context, root)
+
     # 生成 Markdown
     lines = [
         "# Forge Memory Context Pack",
@@ -396,6 +469,14 @@ def generate_context_pack(
         lines.append("- 未找到建议的测试文件。")
 
     lines.extend(["", "## Evidence And Caveats", ""])
+    lines.append(f"- 质量评分：**{quality['grade']}**")
+    for reason in quality["reasons"]:
+        lines.append(f"  - {reason}")
+    if quality["grade"] in ("C", "D"):
+        lines.append("")
+        lines.append(f"> **Caveat**: 质量评分为 {quality['grade']}，上下文包可能不完整。")
+        lines.append("> 建议运行 `forge-memory scan` 更新索引后重新生成。")
+    lines.append("")
     lines.append(f"- 置信度：**{confidence['overall']}**")
     for reason in confidence["reasons"]:
         lines.append(f"  - {reason}")
