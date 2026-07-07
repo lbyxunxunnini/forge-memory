@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.7 (2026-07-07)
+
+可靠性提升与渐进式引导：错误处理全面升级、扫描进度反馈、FAQ 与反模式文档独立、命令后动态下一步提示。
+
+### 改进
+- 错误提示统一为 `[Type] message → 建议操作` 格式，所有子命令均有 try/except 保护
+- `main()` 增加顶层异常捕获，未预期错误不再输出 Python traceback
+- `scan` 命令输出扫描进度（每 200 个文件）和耗时统计
+- 激活 `save_scan_progress`/`load_scan_progress`/`clear_scan_progress`，中断后可恢复
+- `scan`/`status`/`quickstart` 完成后动态显示下一步操作建议
+- `quickstart` 输出渐进式学习路径（入门→进阶→高级）
+- `sqlite_backend.py` 备份/恢复失败从静默 pass 改为输出警告
+- `scanner.py` git 不可用时从静默降级改为输出提示
+
+### 新增
+- `docs/FAQ.md`：10 个使用问题 + 5 个错误信息解读
+- `docs/anti-patterns.md`：触发反模式、使用禁忌、配置反模式
+
 ## v0.4.6 (2026-07-07)
 
 索引能力增强：中文关键词索引、TODO/FIXME 索引、Skill 类型文件识别。

@@ -43,8 +43,8 @@ def save_scan_progress(branch_dir: Path, progress: dict) -> None:
     progress_path = branch_dir / "scan-progress.json"
     try:
         progress_path.write_text(json.dumps(progress, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    except OSError:
-        pass
+    except OSError as e:
+        print(f"[ScanError] 无法保存扫描进度：{e} → 进度丢失，中断后需重新扫描", file=sys.stderr)
 
 
 def load_scan_progress(branch_dir: Path) -> dict | None:
@@ -56,8 +56,8 @@ def load_scan_progress(branch_dir: Path) -> dict | None:
         data = json.loads(progress_path.read_text(encoding="utf-8"))
         if isinstance(data, dict) and "completed_files" in data:
             return data
-    except (json.JSONDecodeError, OSError):
-        pass
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[ScanError] 扫描进度文件损坏：{e} → 将从头开始扫描", file=sys.stderr)
     return None
 
 
@@ -67,8 +67,8 @@ def clear_scan_progress(branch_dir: Path) -> None:
     try:
         if progress_path.exists():
             progress_path.unlink()
-    except OSError:
-        pass
+    except OSError as e:
+        print(f"[ScanError] 无法清理进度文件：{e} → 不影响正常使用", file=sys.stderr)
 
 
 def migrate_to_branch_structure(root: Path) -> str:
@@ -160,7 +160,8 @@ def git_lines(root: Path, args: list[str]) -> list[str]:
             text=True,
             timeout=5,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"[GitError] git 命令不可用：{e} → 部分依赖 git 的功能将受限", file=sys.stderr)
         return []
     if completed.returncode != 0:
         return []
@@ -374,6 +375,7 @@ def scan(
     root: Path,
     max_file_bytes: int = 200_000,
     existing_index: dict[str, dict] | None = None,
+    branch_dir: Path | None = None,
 ) -> dict:
     """扫描项目，返回结构化结果。
 
@@ -382,11 +384,14 @@ def scan(
         max_file_bytes: 每个文件最多读取的字节数
         existing_index: 已有的 index/files.jsonl 数据，格式为 {path: record}，
                         用于增量扫描（content_hash 一致时复用原记录）
+        branch_dir: 分支上下文目录，用于保存/恢复扫描进度
 
     Returns:
         dict 含 files, modules, nodes, edges, worktree,
               changed_files, unchanged_files, new_files, deleted_files
     """
+    import time as _time
+
     root = root.resolve()
     if existing_index is None:
         existing_index = {}
@@ -413,6 +418,13 @@ def scan(
     unchanged_files = 0
     new_files = 0
     seen_paths: set[str] = set()
+
+    # 进度追踪
+    print("[scan] 正在遍历目录...", file=sys.stderr)
+    scan_start = _time.monotonic()
+    files_scanned = 0
+    last_progress_save = 0
+    PROGRESS_SAVE_INTERVAL = 200  # 每 200 个文件保存一次进度
 
     for current, dirnames, filenames in os.walk(root):
         current_path = Path(current)
@@ -541,6 +553,19 @@ def scan(
             files.append(record)
             modules[record["module"]].append(record)
 
+            # 进度反馈与保存
+            files_scanned += 1
+            if files_scanned % 200 == 0:
+                elapsed = _time.monotonic() - scan_start
+                print(f"[scan] 已扫描 {files_scanned} 个文件（{elapsed:.1f}s）...", file=sys.stderr)
+            if branch_dir and files_scanned - last_progress_save >= PROGRESS_SAVE_INTERVAL:
+                save_scan_progress(branch_dir, {
+                    "completed_files": files_scanned,
+                    "last_file": relative,
+                    "started_at": timestamp,
+                })
+                last_progress_save = files_scanned
+
             node_type = (
                 "config" if role == "config"
                 else "document" if role in {"document", "skill"}
@@ -668,6 +693,12 @@ def scan(
                     "meta": {},
                 }
             )
+
+    elapsed = _time.monotonic() - scan_start
+    print(f"[scan] 扫描完成：{files_scanned} 个文件，{elapsed:.1f}s", file=sys.stderr)
+
+    if branch_dir:
+        clear_scan_progress(branch_dir)
 
     return {
         "root": str(root),

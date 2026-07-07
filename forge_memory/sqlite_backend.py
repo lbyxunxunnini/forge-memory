@@ -117,8 +117,8 @@ def import_jsonl_to_sqlite(context: Path, branch: str, max_retries: int = 1) -> 
         backup_path = db_path.with_suffix(".db.bak")
         try:
             shutil.copy2(str(db_path), str(backup_path))
-        except OSError:
-            pass
+        except OSError as e:
+            print(f"[IndexError] 无法备份数据库：{e} → 导入失败时将无法自动恢复", file=sys.stderr)
 
     for attempt in range(max_retries + 1):
         try:
@@ -131,8 +131,8 @@ def import_jsonl_to_sqlite(context: Path, branch: str, max_retries: int = 1) -> 
                 if backup_path.exists():
                     try:
                         shutil.copy2(str(backup_path), str(db_path))
-                    except OSError:
-                        pass
+                    except OSError as restore_err:
+                        print(f"[IndexError] 备份恢复失败：{restore_err} → 后续重试可能仍失败，请检查文件权限", file=sys.stderr)
                 print(f"[IndexError] 导入失败（第 {attempt + 1} 次）：{e} → 正在从备份恢复并重试...", file=sys.stderr)
             else:
                 print(f"[IndexError] 导入失败（已重试 {max_retries} 次）：{e}", file=sys.stderr)

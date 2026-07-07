@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from forge_memory.renderer import render_full_summary
 from forge_memory.scanner import migrate_to_branch_structure, scan
 from forge_memory.session import add_session, list_sessions
 from forge_memory.status import get_status
-from forge_memory.utils import branch_context_path, current_branch
+from forge_memory.utils import branch_context_path, current_branch, ForgeMemoryError, ContextError, ScanError
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -30,7 +31,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     try:
         created = initialize(root, allow_empty_root=args.allow_empty_root)
     except (FileNotFoundError, NotADirectoryError, ValueError) as e:
-        print(f"错误：{e}", file=sys.stderr)
+        print(f"[InitError] 初始化失败：{e} → 请检查项目目录是否存在且有效", file=sys.stderr)
         return 1
     print(f"已初始化项目上下文：{root / '.project-context'}")
     if created:
@@ -147,7 +148,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     existing_index = read_existing_index(branch_dir) if not args.force else {}
 
     try:
-        result = scan(root, args.max_file_bytes, existing_index)
+        result = scan(root, args.max_file_bytes, existing_index, branch_dir)
     except Exception as e:
         # 扫描失败，回滚到备份
         print(f"[ScanError] 扫描中途失败：{e} → 正在回滚到上一次成功状态...", file=sys.stderr)
@@ -211,12 +212,25 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print(f"图谱关系：{len(result['edges'])}")
     print(f"变更文件：{result['changed_files']}，未变：{result['unchanged_files']}，新增：{result['new_files']}，删除：{result['deleted_files']}")
     print(f"Git commit：{len(git_result['commits'])} 个（新增 {new_commits}）")
+
+    # 下一步提示
+    print(f"\n下一步：")
+    print(f"  python3 forge_memory.py status {root}")
+    print(f"  python3 forge_memory.py context {root} --task '你的任务描述'")
+    print(f"  python3 forge_memory.py impact {root} <file>  ← 分析文件影响范围")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
-    status = get_status(root)
+    try:
+        status = get_status(root)
+    except FileNotFoundError as e:
+        print(f"[StatusError] 未找到索引：{e} → 请先运行 forge_memory.py scan", file=sys.stderr)
+        return 1
+    except (ValueError, OSError) as e:
+        print(f"[StatusError] 读取状态失败：{e} → 请检查 .project-context 目录是否完整", file=sys.stderr)
+        return 1
     if status.get("status") == "未扫描":
         print(f"项目：{status['project_name']}")
         print(f"分支：{status['branch']}")
@@ -251,15 +265,30 @@ def cmd_status(args: argparse.Namespace) -> int:
     if advice:
         print(f"建议：{advice}")
 
+    # 下一步提示
+    file_count = status.get("file_count", 0)
+    print(f"\n下一步：")
+    if file_count > 0:
+        print(f"  python3 forge_memory.py context {root} --task '你的任务描述'  ← 生成任务上下文包")
+        print(f"  python3 forge_memory.py impact {root} <file>  ← 分析文件变更影响")
+    else:
+        print(f"  python3 forge_memory.py scan {root}  ← 先扫描项目")
     return 0
 
 
 def cmd_context(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
-    branch = current_branch(root)
-    branch_dir = branch_context_path(root, branch)
-    entry_files = args.entry if args.entry else None
-    pack = generate_context_pack(root, args.task, entry_files)
+    try:
+        branch = current_branch(root)
+        branch_dir = branch_context_path(root, branch)
+        entry_files = args.entry if args.entry else None
+        pack = generate_context_pack(root, args.task, entry_files)
+    except FileNotFoundError as e:
+        print(f"[ContextError] 未找到索引：{e} → 请先运行 forge_memory.py scan", file=sys.stderr)
+        return 1
+    except (ValueError, OSError, KeyError) as e:
+        print(f"[ContextError] 上下文包生成失败：{e} → 请检查索引文件是否完整，或重新运行 scan", file=sys.stderr)
+        return 1
 
     packs_dir = branch_dir / "packs"
     packs_dir.mkdir(parents=True, exist_ok=True)
@@ -273,15 +302,23 @@ def cmd_context(args: argparse.Namespace) -> int:
 
 def cmd_import_db(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
-    branch = args.branch or current_branch(root)
-    context = root / ".project-context"
-    branch_dir = branch_context_path(root, branch)
+    try:
+        branch = args.branch or current_branch(root)
+        context = root / ".project-context"
+        branch_dir = branch_context_path(root, branch)
 
-    if not (branch_dir / "index" / "files.jsonl").exists():
-        print(f"错误：未找到分支 {branch} 的索引，请先运行 scan。", file=sys.stderr)
+        if not (branch_dir / "index" / "files.jsonl").exists():
+            print(f"[ImportError] 未找到分支 {branch} 的索引 → 请先运行 forge_memory.py scan", file=sys.stderr)
+            return 1
+
+        db_path, counts = import_jsonl_to_sqlite(branch_dir, branch)
+    except (OSError, sqlite3.Error) as e:
+        print(f"[ImportError] SQLite 导入失败：{e} → 请检查文件权限，或删除 .db 文件后重试", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[ImportError] 导入失败：{e} → 请运行 forge_memory.py doctor 检查索引健康状态", file=sys.stderr)
         return 1
 
-    db_path, counts = import_jsonl_to_sqlite(branch_dir, branch)
     print(f"已导入 SQLite：{db_path}")
     for table, count in counts.items():
         print(f"  {table}: {count} 行")
@@ -290,21 +327,29 @@ def cmd_import_db(args: argparse.Namespace) -> int:
 
 def cmd_impact(args: argparse.Namespace) -> int:
     root = Path(args.project_root).resolve()
-    branch = current_branch(root)
-    branch_dir = branch_context_path(root, branch)
+    try:
+        branch = current_branch(root)
+        branch_dir = branch_context_path(root, branch)
 
-    if not (branch_dir / "index" / "files.jsonl").exists():
-        print(f"错误：未找到分支 {branch} 的索引，请先运行 scan。", file=sys.stderr)
+        if not (branch_dir / "index" / "files.jsonl").exists():
+            print(f"[ImpactError] 未找到分支 {branch} 的索引 → 请先运行 forge_memory.py scan", file=sys.stderr)
+            return 1
+
+        # 过期检测：自动更新 git 历史
+        if is_git_stale(branch_dir, root):
+            print(f"检测到新 commit，自动更新 git 历史...")
+            git_result = scan_git_history(root)
+            new_commits = append_new_commits(branch_dir, git_result["commits"], git_result["commit_files"])
+            print(f"已更新：{new_commits} 个新 commit")
+
+        result = analyze_impact(root, args.file_path, branch_dir)
+    except FileNotFoundError as e:
+        print(f"[ImpactError] 文件未找到：{e} → 请检查文件路径是否正确（相对于项目根目录）", file=sys.stderr)
+        return 1
+    except (ValueError, OSError) as e:
+        print(f"[ImpactError] 影响分析失败：{e} → 请运行 forge_memory.py status 检查索引状态", file=sys.stderr)
         return 1
 
-    # 过期检测：自动更新 git 历史
-    if is_git_stale(branch_dir, root):
-        print(f"检测到新 commit，自动更新 git 历史...")
-        git_result = scan_git_history(root)
-        new_commits = append_new_commits(branch_dir, git_result["commits"], git_result["commit_files"])
-        print(f"已更新：{new_commits} 个新 commit")
-
-    result = analyze_impact(root, args.file_path, branch_dir)
     print(format_impact(result))
     return 0
 
@@ -360,6 +405,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    try:
+        return _main()
+    except KeyboardInterrupt:
+        print("\n操作已取消。", file=sys.stderr)
+        return 130
+    except ForgeMemoryError as e:
+        print(f"{e} → 请运行 forge_memory.py doctor 检查环境", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[FatalError] 未预期的错误：{e} → 请运行 forge_memory.py doctor 检查环境，或报告 issue", file=sys.stderr)
+        return 1
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser(
         prog="forge-memory",
         description="Forge Memory — 面向研发智能体的本地项目记忆层。",
