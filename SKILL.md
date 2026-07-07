@@ -2,7 +2,7 @@
 slug: forge-memory-user-88546431
 displayName: Forge Memory
 version: 0.4.1
-summary: 项目记忆层，负责项目认知和上下文供给，支持分支隔离、Git 历史、影响分析、SQLite 索引、一键初始化、误用检测和可观测性。
+summary: 让 AI 编程助手记住你的项目。三条命令初始化，之后 AI 自动理解项目结构、找到相关文件、知道最近改了什么。支持多分支隔离、会话记忆恢复、质量评分和一键诊断。
 tags: [memory, project, context, workflow, index]
 license: MIT
 name: forge-memory
