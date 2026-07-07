@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.3 (2026-07-07)
+
+发布到 SkillHub，包含 v0.4.1-v0.4.2 全部改进。
+
+### 新增
+- 上下文包质量评分：基于覆盖率/新鲜度/Hash 覆盖率的 A/B/C/D 评分
+- 会话恢复异常处理：文件损坏、摘要过时、index 不一致的检测和回退路径
+- doctor 输出 schema：定义 doctor 命令的 JSON 输出结构
+- 核心操作退出条件表：init/scan/context/import-db 的异常退出和降级策略
+- status 命令质量评分：C/D 时输出重新扫描建议
+- SKILL.md Mermaid 架构流程图
+
+### 变更
+- SKILL.md 自动触发条件细化和授权机制明确化
+- schema.md 目录结构更新为分支隔离布局
+- workflow.md 触发前提与 SKILL.md 对齐
+- SKILL.md 脚本部分补充 doctor 命令
+- SKILL.md 验证章节增加质量评分检查步骤
+- 项目说明.md CLI 章节引用 SKILL.md 避免重复维护
+- 评分提升计划切换到三方评估法 14 维度
+
 ## v0.4.2 (2026-07-07)
 
 P2 改进：退出条件、质量评分闭环、架构流程图、文档整合。
