@@ -10,6 +10,8 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
+import sys
+
 from .utils import (
     CONFIG_NAMES,
     DOC_PATTERNS,
@@ -22,6 +24,7 @@ from .utils import (
     branch_context_path,
     content_hash,
     current_branch,
+    format_error,
     is_text_file,
     now_iso,
     read_text,
@@ -29,6 +32,43 @@ from .utils import (
     slugify,
     stable_id,
 )
+
+# 大项目分批扫描参数
+MAX_BATCH_SIZE = 1000
+MAX_BATCH_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+def save_scan_progress(branch_dir: Path, progress: dict) -> None:
+    """保存扫描进度到 .project-context/scan-progress.json"""
+    progress_path = branch_dir / "scan-progress.json"
+    try:
+        progress_path.write_text(json.dumps(progress, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_scan_progress(branch_dir: Path) -> dict | None:
+    """加载扫描进度，如果不存在或无效则返回 None"""
+    progress_path = branch_dir / "scan-progress.json"
+    if not progress_path.exists():
+        return None
+    try:
+        data = json.loads(progress_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and "completed_files" in data:
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def clear_scan_progress(branch_dir: Path) -> None:
+    """清理扫描进度文件"""
+    progress_path = branch_dir / "scan-progress.json"
+    try:
+        if progress_path.exists():
+            progress_path.unlink()
+    except OSError:
+        pass
 
 
 def migrate_to_branch_structure(root: Path) -> str:

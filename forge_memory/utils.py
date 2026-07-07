@@ -100,6 +100,56 @@ PROJECT_SIGNAL_NAMES = {
 PROJECT_SIGNAL_DIRS = {"src", "lib", "app", "packages", "apps", "services", "tests"}
 
 
+# --- 错误格式化 ---
+
+class ForgeMemoryError(Exception):
+    """Forge Memory 基础异常类。"""
+
+    def __init__(self, error_type: str, message: str, suggestion: str = ""):
+        self.error_type = error_type
+        self.message = message
+        self.suggestion = suggestion
+        super().__init__(format_error(error_type, message, suggestion))
+
+
+def format_error(error_type: str, message: str, suggestion: str = "") -> str:
+    """格式化错误信息：[错误类型] 一句话说明 → 建议操作"""
+    text = f"[{error_type}] {message}"
+    if suggestion:
+        text += f" → {suggestion}"
+    return text
+
+
+class GitError(ForgeMemoryError):
+    """Git 相关错误。"""
+    def __init__(self, message: str, suggestion: str = ""):
+        super().__init__("GitError", message, suggestion)
+
+
+class ScanError(ForgeMemoryError):
+    """扫描相关错误。"""
+    def __init__(self, message: str, suggestion: str = ""):
+        super().__init__("ScanError", message, suggestion)
+
+
+class IndexError(ForgeMemoryError):
+    """索引相关错误。"""
+    def __init__(self, message: str, suggestion: str = ""):
+        super().__init__("IndexError", message, suggestion)
+
+
+class ContextError(ForgeMemoryError):
+    """上下文包相关错误。"""
+    def __init__(self, message: str, suggestion: str = ""):
+        super().__init__("ContextError", message, suggestion)
+
+
+class SessionError(ForgeMemoryError):
+    """会话记忆相关错误。"""
+    def __init__(self, message: str, suggestion: str = ""):
+        super().__init__("SessionError", message, suggestion)
+
+
 # --- 工具函数 ---
 
 def now_iso() -> str:

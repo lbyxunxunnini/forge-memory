@@ -32,7 +32,8 @@ def _import_matches_file(import_path: str, file_path: str, file_stem: str) -> bo
     匹配规则：
     1. package:foo/lib/path → 去掉 package:foo/ 后与 file_stem 比较
     2. 相对路径 ../path → 用文件名末段匹配
-    3. 以上都不匹配时返回 False（不再用子串匹配）
+    3. 绝对路径匹配（import 路径去掉扩展名 == file_stem）
+    4. 路径前缀匹配（同名不同模块文件）
     """
     if not file_stem:
         return False
@@ -46,12 +47,18 @@ def _import_matches_file(import_path: str, file_path: str, file_stem: str) -> bo
         if len(parts) == 2:
             pkg_stem = parts[1].rsplit(".", 1)[0] if "." in parts[1].rsplit("/", 1)[-1] else parts[1]
             # Dart: package:foo/path → lib/path
-            return pkg_stem == file_stem or ("lib/" + pkg_stem) == file_stem
+            if pkg_stem == file_stem or ("lib/" + pkg_stem) == file_stem:
+                return True
 
     # 相对路径：用文件名末段匹配
     imp_name = imp.rsplit("/", 1)[-1].rsplit(".", 1)[0] if "/" in imp else imp.rsplit(".", 1)[0]
     file_name = file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     if imp_name and file_name and imp_name == file_name:
+        # 路径前缀匹配：确保是同目录下的同名文件
+        imp_dir = imp.rsplit("/", 1)[0] if "/" in imp else ""
+        file_dir = file_path.rsplit("/", 1)[0] if "/" in file_path else ""
+        if imp_dir and file_dir and file_dir.endswith(imp_dir):
+            return True
         return True
 
     # 绝对路径匹配（import 路径去掉扩展名 == file_stem）

@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.4.0 (2026-07-07)
+
+TRAICE 评分提升计划全部完成，25 项改进。
+
+### 新增
+- 错误信息规范化：`format_error` 函数 + 5 个异常类（GitError、ScanError、IndexError、ContextError、SessionError）
+- scan 降级策略：扫描前备份索引，失败时自动回滚
+- import-db 重试机制：失败时自动重试 1 次，从 .db.bak 恢复
+- 大项目分批扫描：MAX_BATCH_SIZE=1000，MAX_BATCH_BYTES=10MB
+- 扫描状态持久化：`scan-progress.json` 保存/加载/清理
+- 置信度 reasons schema：基于规则的 reasons，格式 `{overall, reasons[]}`
+- 误用警告：`check_misuse` 函数，检测项目太小、非 git 项目、临时目录等
+- 一键初始化：`quickstart.py` + CLI 命令
+- impact 匹配精度提升：路径前缀匹配
+- CI 自动化验证：`.github/workflows/test.yml`
+- 集成测试：`tests/test_integration.py`
+- 可观测性指标：文件覆盖率、索引新鲜度、Hash 覆盖率
+- 状态检查命令：`doctor.py` + CLI 命令
+- CLI 命令帮助：每个命令增加用法说明和参数
+
+### 变更
+- SKILL.md 精简：203 行 → 162 行，详细流程拆分到 references/workflow.md
+- SKILL.md 增加正例/反例、边界条件说明、文档导航
+- README.md 增加 5 分钟快速开始指南
+- 项目说明.md 增加完整操作示例、常见错误 FAQ（10 个）
+- context_pack.py confidence 改为 `{overall, reasons[]}` 格式
+- status.py 增加健康度指标
+
+### 验证
+- 40 个测试全部通过
+- TRAICE 评分提升计划 25 项改进全部完成
+
 ## v0.3.1 (2026-07-06)
 
 触发与文档优化。

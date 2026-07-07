@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from .utils import (
@@ -25,6 +26,37 @@ def write_if_missing(path: Path, content: str) -> bool:
     return True
 
 
+def check_misuse(root: Path, allow_empty_root: bool = False) -> list[str]:
+    """检测常见误用场景，返回警告信息列表。"""
+    warnings = []
+    root = root.resolve()
+
+    # 检查是否是 git 项目
+    if not (root / ".git").exists():
+        warnings.append("[Warning] 非 git 项目：commit 历史功能将受限 → 建议先运行 git init")
+
+    # 检查项目大小
+    try:
+        file_count = sum(1 for _ in root.rglob("*") if _.is_file() and not any(
+            part.startswith(".") or part in {"node_modules", "__pycache__", "venv", ".venv"}
+            for part in _.relative_to(root).parts
+        ))
+        if file_count < 10:
+            warnings.append(f"[Warning] 项目太小（{file_count} 个文件）：扫描意义不大 → 建议直接阅读项目文件")
+        elif file_count > 50000:
+            warnings.append(f"[Warning] 项目过大（{file_count} 个文件）：扫描可能耗时较长 → 建议使用 --max-files 参数限制")
+    except OSError:
+        pass
+
+    # 检查是否是临时目录
+    temp_patterns = {"/tmp/", "/temp/", "temp/", "tmp/", ".cache/", ".temp/"}
+    root_str = str(root).lower()
+    if any(pattern in root_str for pattern in temp_patterns):
+        warnings.append("[Warning] 临时目录：扫描结果可能无意义 → 建议扫描正式项目目录")
+
+    return warnings
+
+
 def initialize(root: Path, allow_empty_root: bool = False) -> list[Path]:
     root = root.resolve()
     if not root.exists():
@@ -33,6 +65,11 @@ def initialize(root: Path, allow_empty_root: bool = False) -> list[Path]:
         raise NotADirectoryError(f"项目根目录不是目录：{root}")
     if not allow_empty_root and not has_project_signal(root):
         raise ValueError("未发现明显项目信号；如确认这是项目根目录，请添加 --allow-empty-root。")
+
+    # 误用警告
+    warnings = check_misuse(root, allow_empty_root)
+    for warning in warnings:
+        print(warning, file=sys.stderr)
 
     context = root / ".project-context"
     branch = current_branch(root)

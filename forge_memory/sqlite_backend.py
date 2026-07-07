@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 
@@ -89,8 +90,17 @@ def _load_jsonl(path: Path) -> list[dict]:
     return result
 
 
-def import_jsonl_to_sqlite(context: Path, branch: str) -> str:
-    """将 JSONL 数据导入 SQLite，返回 .db 文件路径。"""
+def import_jsonl_to_sqlite(context: Path, branch: str, max_retries: int = 1) -> str:
+    """将 JSONL 数据导入 SQLite，返回 .db 文件路径。
+
+    Args:
+        context: .project-context 或 branches/<branch> 路径
+        branch: 分支名
+        max_retries: 最大重试次数（从 .db.bak 恢复）
+
+    Returns:
+        (db_path, counts) 元组
+    """
     from .utils import branch_context_path
 
     # 兼容：context 可能是 .project-context 或 branches/<branch>
@@ -105,8 +115,37 @@ def import_jsonl_to_sqlite(context: Path, branch: str) -> str:
     if db_path.exists():
         import shutil
         backup_path = db_path.with_suffix(".db.bak")
-        shutil.copy2(str(db_path), str(backup_path))
+        try:
+            shutil.copy2(str(db_path), str(backup_path))
+        except OSError:
+            pass
 
+    for attempt in range(max_retries + 1):
+        try:
+            return _do_import(db_path, branch_dir)
+        except Exception as e:
+            import shutil
+            if attempt < max_retries:
+                # 从备份恢复
+                backup_path = db_path.with_suffix(".db.bak")
+                if backup_path.exists():
+                    try:
+                        shutil.copy2(str(backup_path), str(db_path))
+                    except OSError:
+                        pass
+                print(f"[IndexError] 导入失败（第 {attempt + 1} 次）：{e} → 正在从备份恢复并重试...", file=sys.stderr)
+            else:
+                print(f"[IndexError] 导入失败（已重试 {max_retries} 次）：{e}", file=sys.stderr)
+                backup_path = db_path.with_suffix(".db.bak")
+                if backup_path.exists():
+                    print(f"人工干预：从备份恢复 → cp {backup_path} {db_path}", file=sys.stderr)
+                else:
+                    print(f"人工干预：重新扫描 → python3 forge_memory.py scan {branch_dir.parent.parent}", file=sys.stderr)
+                raise
+
+
+def _do_import(db_path: Path, branch_dir: Path) -> tuple[str, dict]:
+    """执行实际的 JSONL → SQLite 导入。"""
     conn = sqlite3.connect(str(db_path))
     conn.executescript(SCHEMA_SQL)
 

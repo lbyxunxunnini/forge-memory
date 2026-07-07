@@ -9,12 +9,14 @@ import sys
 from pathlib import Path
 
 from forge_memory.context_pack import generate_context_pack
+from forge_memory.doctor import doctor as cmd_doctor_impl
 from forge_memory.git_history import append_new_commits, is_git_stale, scan_git_history
 from forge_memory.grapher import write_graph
 from forge_memory.impact import analyze_impact, format_impact
 from forge_memory.sqlite_backend import import_jsonl_to_sqlite
 from forge_memory.indexer import read_existing_index, write_index, write_scan_summary
 from forge_memory.init import initialize
+from forge_memory.quickstart import quickstart as cmd_quickstart_impl
 from forge_memory.renderer import render_full_summary
 from forge_memory.scanner import migrate_to_branch_structure, scan
 from forge_memory.session import add_session, list_sessions
@@ -56,10 +58,38 @@ def cmd_scan(args: argparse.Namespace) -> int:
     branch = migrate_to_branch_structure(root)
     branch_dir = branch_context_path(root, branch)
 
+    # 降级策略：备份当前索引，扫描失败时回滚
+    backup_dir = branch_dir / ".backup"
+    index_dir = branch_dir / "index"
+    if index_dir.exists() and any(index_dir.iterdir()):
+        try:
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir)
+            shutil.copytree(index_dir, backup_dir)
+        except OSError as e:
+            print(f"警告：无法备份索引：{e}", file=sys.stderr)
+
     # 读取已有索引用于增量扫描
     existing_index = read_existing_index(branch_dir) if not args.force else {}
 
-    result = scan(root, args.max_file_bytes, existing_index)
+    try:
+        result = scan(root, args.max_file_bytes, existing_index)
+    except Exception as e:
+        # 扫描失败，回滚到备份
+        print(f"[ScanError] 扫描中途失败：{e} → 正在回滚到上一次成功状态...", file=sys.stderr)
+        if backup_dir.exists():
+            try:
+                if index_dir.exists():
+                    shutil.rmtree(index_dir)
+                shutil.copytree(backup_dir, index_dir)
+                print("已回滚到上一次成功的索引状态。", file=sys.stderr)
+                print(f"恢复命令：python3 forge_memory.py scan {root}", file=sys.stderr)
+            except OSError as rollback_err:
+                print(f"[ScanError] 回滚失败：{rollback_err} → 请手动恢复或重新扫描", file=sys.stderr)
+        else:
+            print(f"[ScanError] 无备份可回滚 → 请运行 python3 forge_memory.py scan {root} 重新扫描", file=sys.stderr)
+        return 1
+
     write_index(root, result, branch_dir)
     write_scan_summary(root, result, branch_dir)
     write_graph(root, result, branch_dir)
@@ -85,6 +115,13 @@ def cmd_scan(args: argparse.Namespace) -> int:
     # Git 历史扫描
     git_result = scan_git_history(root)
     new_commits = append_new_commits(branch_dir, git_result["commits"], git_result["commit_files"])
+
+    # 清理备份
+    if backup_dir.exists():
+        try:
+            shutil.rmtree(backup_dir)
+        except OSError:
+            pass
 
     print(f"已扫描项目：{root}")
     print(f"当前分支：{branch}")
@@ -118,6 +155,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"新增文件：{status['new_files']}")
     print(f"删除文件：{status['deleted_files']}")
     print(f"Commit 数：{status.get('commit_count', 0)}")
+
+    # 显示健康度指标
+    health = status.get("health", {})
+    if health:
+        print("\n索引健康度：")
+        print(f"  文件覆盖率：{health.get('file_coverage', 'N/A')} ({health.get('file_coverage_status', 'unknown')})")
+        print(f"  索引新鲜度：{health.get('index_freshness', 'unknown')} ({health.get('index_age_hours', 'N/A')} 小时)")
+        print(f"  Hash 覆盖率：{health.get('hash_coverage', 'N/A')}")
+
     return 0
 
 
@@ -216,6 +262,16 @@ def cmd_session_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_quickstart(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    return cmd_quickstart_impl(root, interactive=True)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    return cmd_doctor_impl(root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="forge-memory",
@@ -271,6 +327,14 @@ def main() -> int:
     p_list.add_argument("project_root", nargs="?", default=".", help="项目根目录")
     p_list.add_argument("--json", action="store_true", help="输出 JSON 格式")
 
+    # quickstart
+    p_quickstart = subparsers.add_parser("quickstart", help="一键初始化（init + scan + 上下文包）")
+    p_quickstart.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+
+    # doctor
+    p_doctor = subparsers.add_parser("doctor", help="检查环境依赖和索引健康状态")
+    p_doctor.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -297,6 +361,10 @@ def main() -> int:
         else:
             p_session.print_help()
             return 1
+    elif args.command == "quickstart":
+        return cmd_quickstart(args)
+    elif args.command == "doctor":
+        return cmd_doctor(args)
     else:
         parser.print_help()
         return 1

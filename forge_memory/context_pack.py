@@ -269,14 +269,43 @@ def generate_context_pack(
             for f in mod_files[:3]:
                 suggested_tests.append(f["path"])
 
-    # 置信度
+    # 置信度（基于规则的 reasons）
     match_ratio = len(related_files) / max(len(files), 1)
+    confidence_reasons = []
+
+    # 规则 1：匹配文件比例
+    if match_ratio > 0.05:
+        confidence_reasons.append(f"匹配文件比例 {match_ratio:.1%} > 5%")
+    elif match_ratio > 0.01:
+        confidence_reasons.append(f"匹配文件比例 {match_ratio:.1%}（1%-5%）")
+    else:
+        confidence_reasons.append(f"匹配文件比例 {match_ratio:.1%} < 1%")
+
+    # 规则 2：相关文件数量
+    if len(related_files) >= 5:
+        confidence_reasons.append(f"相关文件数 {len(related_files)} >= 5")
+    elif len(related_files) >= 2:
+        confidence_reasons.append(f"相关文件数 {len(related_files)}（2-4）")
+    else:
+        confidence_reasons.append(f"相关文件数 {len(related_files)} < 2")
+
+    # 规则 3：入口文件匹配
+    if entry_files:
+        matched_entries = [f for f in related_files if f["path"] in entry_files]
+        if matched_entries:
+            confidence_reasons.append(f"入口文件匹配：{len(matched_entries)}/{len(entry_files)}")
+        else:
+            confidence_reasons.append("入口文件匹配：无")
+
+    # 综合判定
     if match_ratio > 0.05 and len(related_files) >= 5:
         confidence = "high"
     elif match_ratio > 0.01 and len(related_files) >= 2:
         confidence = "medium"
     else:
         confidence = "low"
+
+    confidence = {"overall": confidence, "reasons": confidence_reasons}
 
     # 生成 Markdown
     lines = [
@@ -367,11 +396,13 @@ def generate_context_pack(
         lines.append("- 未找到建议的测试文件。")
 
     lines.extend(["", "## Evidence And Caveats", ""])
-    lines.append(f"- 置信度：**{confidence}**")
+    lines.append(f"- 置信度：**{confidence['overall']}**")
+    for reason in confidence["reasons"]:
+        lines.append(f"  - {reason}")
     lines.append(f"- 匹配关键词：{', '.join(keywords[:10]) if keywords else '(无)'}")
     lines.append(f"- 相关文件数：{len(related_files)}")
     lines.append(f"- 总文件数：{len(files)}")
-    if confidence == "low":
+    if confidence["overall"] == "low":
         lines.append("")
         lines.append("> **Caveat**: 置信度较低。任务描述与项目索引的匹配度不足，")
         lines.append("> 上下文包可能遗漏关键文件或包含不相关内容。建议结合源码阅读验证。")
