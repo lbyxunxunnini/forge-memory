@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.6 (2026-07-07)
+
+索引能力增强：中文关键词索引、TODO/FIXME 索引、Skill 类型文件识别。
+
+### 新增
+- 中文关键词索引：从源码字符串字面量提取中文，用于中文意图定位代码模块
+- TODO/FIXME 索引：提取代码中的 TODO/FIXME/HACK/NOTE 注释，带行号
+- Skill 类型识别：SKILL.md、references/、agents/ 被识别为 skill 类型，提取中文段落关键词
+- `extract_chinese_keywords`、`extract_todos`、`extract_skill_keywords` 三个新函数
+
+### 修复
+- 修复 `shutil` import 缺失
+- 修复 `classify_file` 传入绝对路径导致 skill 目录匹配失败
+
 ## v0.4.5 (2026-07-07)
 
 触发规则升级为三级：完整触发、被动读取、不触发。局部任务时被动读取 project-summary.md 加速代码定位。

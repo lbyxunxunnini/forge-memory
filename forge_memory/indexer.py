@@ -47,6 +47,9 @@ def write_index(root: Path, scan_result: dict, branch_dir: Path | None = None) -
             "module_id": f.get("module_id", ""),
             "symbols": f.get("symbols", []),
             "imports": f.get("imports", []),
+            "chinese_keywords": f.get("chinese_keywords", []),
+            "todos": f.get("todos", []),
+            "skill_keywords": f.get("skill_keywords", []),
             "updated_at": f.get("updated_at", ""),
         }
         file_rows.append(row)

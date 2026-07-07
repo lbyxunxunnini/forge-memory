@@ -114,10 +114,19 @@ def migrate_to_branch_structure(root: Path) -> str:
     return branch
 
 
+SKILL_FILE_NAMES = {"SKILL.md", "skill.md"}
+SKILL_DIR_NAMES = {"references", "agents", "scripts"}
+
+
 def classify_file(path: Path) -> str:
     name = path.name
     if name in CONFIG_NAMES or name.startswith(".env.example"):
         return "config"
+    # skill 类型：SKILL.md 或 references/agents/scripts 目录下的文件
+    if name in SKILL_FILE_NAMES or (
+        len(path.parts) >= 2 and path.parts[0] in SKILL_DIR_NAMES
+    ):
+        return "skill"
     if path.suffix.lower() in {".md", ".rst", ".txt"} or DOC_PATTERNS.search(name):
         return "document"
     if "test" in path.parts or "tests" in path.parts or path.name.endswith(
@@ -192,6 +201,55 @@ def extract_imports(text: str) -> list[str]:
             if len(imports) >= 30:
                 return imports
     return imports
+
+
+_CHINESE_RE = __import__("re").compile(r"['\"]([^'\"]{2,50}[一-鿿][^'\"]{0,50})['\"]")
+_TODO_RE = __import__("re").compile(
+    r"(?:#|//|--|;)\s*(TODO|FIXME|HACK|XXX|WARN|NOTE)[\s:：]+(.+)", re.I
+)
+_ZH_PARA_RE = __import__("re").compile(r"[一-鿿][^\n]{5,200}")
+
+
+def extract_chinese_keywords(text: str, max_keywords: int = 15) -> list[str]:
+    """从源码中提取中文字符串字面量（限 2-100 字符），用作功能关键词索引。"""
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for m in _CHINESE_RE.finditer(text):
+        word = m.group(1).strip()
+        if 2 <= len(word) <= 100 and "\n" not in word and word not in seen:
+            seen.add(word)
+            keywords.append(word)
+            if len(keywords) >= max_keywords:
+                break
+    return keywords
+
+
+def extract_todos(text: str, max_todos: int = 20) -> list[dict]:
+    """提取 TODO/FIXME/HACK 等注释标记。"""
+    todos: list[dict] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        m = _TODO_RE.search(line)
+        if m:
+            todos.append({"line": i, "tag": m.group(1).upper(), "text": m.group(2).strip()})
+            if len(todos) >= max_todos:
+                break
+    return todos
+
+
+def extract_skill_keywords(text: str, max_keywords: int = 20) -> list[str]:
+    """从 skill 类型文件（SKILL.md、references/）中提取中文段落关键词。"""
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for m in _ZH_PARA_RE.finditer(text):
+        sent = m.group(0).strip()
+        # 取前 60 字符作为关键词片段
+        snippet = sent[:60].rstrip("，。、；：！？…")
+        if snippet not in seen and len(snippet) >= 5:
+            seen.add(snippet)
+            keywords.append(snippet)
+            if len(keywords) >= max_keywords:
+                break
+    return keywords
 
 
 def extract_first_paragraph(text: str) -> str:
@@ -398,7 +456,7 @@ def scan(
 
             relative = rel(path, root)
             seen_paths.add(relative)
-            role = classify_file(path)
+            role = classify_file(Path(relative))
             language = LANG_BY_SUFFIX.get(path.suffix.lower(), "")
             size = path.stat().st_size
 
@@ -416,7 +474,18 @@ def scan(
             commands: list[str] = []
             dependencies: list[str] = []
 
-            if role == "document":
+            chinese_keywords: list[str] = []
+            todos: list[dict] = []
+            skill_keywords: list[str] = []
+
+            if role == "skill":
+                for line in text.splitlines():
+                    if line.strip().startswith("#"):
+                        first_heading = line.strip("# ").strip()
+                        break
+                excerpt = extract_first_paragraph(text)
+                skill_keywords = extract_skill_keywords(text)
+            elif role == "document":
                 for line in text.splitlines():
                     if line.strip().startswith("#"):
                         first_heading = line.strip("# ").strip()
@@ -424,6 +493,8 @@ def scan(
                 excerpt = extract_first_paragraph(text)
             elif role == "source":
                 code_comment = extract_code_comments(text, language)
+                chinese_keywords = extract_chinese_keywords(text)
+                todos = extract_todos(text)
             if path.name == "package.json":
                 commands = extract_package_scripts(text)
                 dependencies = extract_package_dependencies(text)
@@ -459,6 +530,9 @@ def scan(
                 "heading": first_heading,
                 "excerpt": excerpt,
                 "code_comment": code_comment,
+                "chinese_keywords": chinese_keywords,
+                "todos": todos,
+                "skill_keywords": skill_keywords,
                 "commands": commands,
                 "dependencies": dependencies,
                 "change_status": change_status,
@@ -469,7 +543,7 @@ def scan(
 
             node_type = (
                 "config" if role == "config"
-                else "document" if role == "document"
+                else "document" if role in {"document", "skill"}
                 else "file"
             )
             summary_bits = [role]

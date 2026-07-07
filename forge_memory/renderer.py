@@ -240,6 +240,31 @@ def render_project_overview(scan_result: dict) -> str:
         for item in source_with_comments[:5]:
             lines.append(f"- `{item['path']}`：{item['code_comment']}")
 
+    source_with_chinese = [item for item in source if item.get("chinese_keywords")]
+    if source_with_chinese:
+        lines.extend(["", "## 中文关键词索引", ""])
+        lines.append("> 从源码字符串字面量提取，用于中文意图定位代码模块。")
+        for item in source_with_chinese[:30]:
+            kw = "、".join(item["chinese_keywords"][:8])
+            lines.append(f"- `{item['path']}`：{kw}")
+
+    # TODO/FIXME 索引
+    source_with_todos = [item for item in source if item.get("todos")]
+    if source_with_todos:
+        lines.extend(["", "## TODO / FIXME 索引", ""])
+        for item in source_with_todos[:20]:
+            for todo in item["todos"][:5]:
+                lines.append(f"- `{item['path']}:{todo['line']}` [{todo['tag']}] {todo['text']}")
+
+    # Skill 关键词索引
+    skill_files = [item for item in files if item.get("skill_keywords")]
+    if skill_files:
+        lines.extend(["", "## Skill 文档关键词", ""])
+        lines.append("> 从 SKILL.md、references/ 等文档提取的中文关键词，用于理解 skill 的功能定位。")
+        for item in skill_files[:15]:
+            kw = "、".join(item["skill_keywords"][:6])
+            lines.append(f"- `{item['path']}`：{kw}")
+
     lines.extend(["", "## 入口与命令", ""])
     if entry_points:
         lines.append("- 可能入口文件：")
