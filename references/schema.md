@@ -137,9 +137,13 @@ status 取值：`ok`（正常）、`warning`（警告，不影响核心功能）
   "module_id": "mod-src-51a9c771",
   "symbols": ["main"],
   "imports": ["./app"],
+  "chunk_count": 3,
+  "review_status": "auto",
   "updated_at": "2026-07-06T10:00:00+08:00"
 }
 ```
+
+review_status 取值：`auto`（扫描自动生成）、`reviewed`（人工确认）、`corrupted`（标记为错误，context pack 自动过滤）
 
 ## index/modules.jsonl
 
@@ -187,6 +191,25 @@ status 取值：`ok`（正常）、`warning`（警告，不影响核心功能）
 ```
 
 关系类型：`contains`、`defines`、`imports`、`references`、`documents`、`configures`
+
+## index/chunks.jsonl
+
+每行一个代码 chunk（函数、类、文档、TODO 等），由源码文件提取。
+
+```json
+{
+  "id": "chunk-src-main-ts-func-main-a1b2c3d4",
+  "file_path": "src/main.ts",
+  "line_start": 10,
+  "line_end": 25,
+  "type": "function",
+  "name": "main",
+  "summary": "export function main() { ... }",
+  "content_hash": "a1b2c3d4e5f67890"
+}
+```
+
+type 取值：`function`（函数/方法）、`class`（类/接口/类型）、`docstring`（文档注释）、`comment`（块注释）、`todo`（TODO/FIXME/HACK）
 
 ## packs/latest-context-pack.md
 

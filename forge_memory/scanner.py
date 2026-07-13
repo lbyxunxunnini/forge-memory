@@ -12,6 +12,7 @@ from pathlib import Path
 
 import sys
 
+from .chunker import extract_chunks
 from .utils import (
     CONFIG_NAMES,
     DOC_PATTERNS,
@@ -489,6 +490,7 @@ def scan(
             chinese_keywords: list[str] = []
             todos: list[dict] = []
             skill_keywords: list[str] = []
+            chunks: list[dict] = []
 
             if role == "skill":
                 for line in text.splitlines():
@@ -507,6 +509,7 @@ def scan(
                 code_comment = extract_code_comments(text, language)
                 chinese_keywords = extract_chinese_keywords(text)
                 todos = extract_todos(text)
+                chunks = extract_chunks(relative, text)
             if path.name == "package.json":
                 commands = extract_package_scripts(text)
                 dependencies = extract_package_dependencies(text)
@@ -545,6 +548,7 @@ def scan(
                 "chinese_keywords": chinese_keywords,
                 "todos": todos,
                 "skill_keywords": skill_keywords,
+                "chunks": chunks,
                 "commands": commands,
                 "dependencies": dependencies,
                 "change_status": change_status,

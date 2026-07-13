@@ -29,13 +29,16 @@ def read_existing_index(context: Path) -> dict[str, dict]:
 
 
 def write_index(root: Path, scan_result: dict, branch_dir: Path | None = None) -> None:
-    """写出 index/files.jsonl 和 index/modules.jsonl。"""
+    """写出 index/files.jsonl、index/modules.jsonl 和 index/chunks.jsonl。"""
     index_dir = (branch_dir or root / ".project-context") / "index"
     index_dir.mkdir(parents=True, exist_ok=True)
 
     # files.jsonl
     file_rows = []
+    all_chunks: list[dict] = []
     for f in scan_result["files"]:
+        chunks = f.get("chunks", [])
+        all_chunks.extend(chunks)
         row = {
             "id": f["id"],
             "path": f["path"],
@@ -50,6 +53,8 @@ def write_index(root: Path, scan_result: dict, branch_dir: Path | None = None) -
             "chinese_keywords": f.get("chinese_keywords", []),
             "todos": f.get("todos", []),
             "skill_keywords": f.get("skill_keywords", []),
+            "chunk_count": len(chunks),
+            "review_status": f.get("review_status", "auto"),
             "updated_at": f.get("updated_at", ""),
         }
         file_rows.append(row)
@@ -81,6 +86,13 @@ def write_index(root: Path, scan_result: dict, branch_dir: Path | None = None) -
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in mod_rows),
         encoding="utf-8",
     )
+
+    # chunks.jsonl
+    if all_chunks:
+        (index_dir / "chunks.jsonl").write_text(
+            "".join(json.dumps(chunk, sort_keys=True) + "\n" for chunk in all_chunks),
+            encoding="utf-8",
+        )
 
 
 def write_scan_summary(root: Path, scan_result: dict, branch_dir: Path | None = None) -> None:

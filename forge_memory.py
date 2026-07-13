@@ -20,6 +20,7 @@ from forge_memory.indexer import read_existing_index, write_index, write_scan_su
 from forge_memory.init import initialize
 from forge_memory.quickstart import quickstart as cmd_quickstart_impl
 from forge_memory.renderer import render_full_summary
+from forge_memory.review import review_list, review_mark
 from forge_memory.scanner import migrate_to_branch_structure, scan
 from forge_memory.session import add_session, list_sessions
 from forge_memory.status import get_status
@@ -404,6 +405,56 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return cmd_doctor_impl(root)
 
 
+def cmd_review_mark(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    try:
+        result = review_mark(root, args.file, args.status)
+    except FileNotFoundError as e:
+        print(f"[ReviewError] {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"[ReviewError] {e}", file=sys.stderr)
+        return 1
+    print(f"已标记 {result['path']}: {result['old_status']} → {result['new_status']}")
+    return 0
+
+
+def cmd_review_list(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).resolve()
+    try:
+        items = review_list(root)
+    except FileNotFoundError as e:
+        print(f"[ReviewError] {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(items, indent=2, ensure_ascii=False))
+        return 0
+
+    if not items:
+        print("索引为空，请先运行 scan。")
+        return 0
+
+    # 按 review_status 分组显示
+    from collections import Counter
+    counts = Counter(item["review_status"] for item in items)
+    print(f"共 {len(items)} 个文件：")
+    print(f"  auto: {counts.get('auto', 0)}")
+    print(f"  reviewed: {counts.get('reviewed', 0)}")
+    print(f"  corrupted: {counts.get('corrupted', 0)}")
+
+    if args.status:
+        filtered = [i for i in items if i["review_status"] == args.status]
+        if filtered:
+            print(f"\n状态为 '{args.status}' 的文件：")
+            for item in filtered:
+                print(f"  {item['path']} ({item['role']})")
+        else:
+            print(f"\n没有状态为 '{args.status}' 的文件。")
+
+    return 0
+
+
 def main() -> int:
     try:
         return _main()
@@ -477,6 +528,22 @@ def _main() -> int:
     p_quickstart = subparsers.add_parser("quickstart", help="一键初始化（init + scan + 上下文包）")
     p_quickstart.add_argument("project_root", nargs="?", default=".", help="项目根目录")
 
+    # review
+    p_review = subparsers.add_parser("review", help="管理索引条目的 review 状态")
+    review_sub = p_review.add_subparsers(dest="review_command", help="review 子命令")
+
+    # review mark
+    p_mark = review_sub.add_parser("mark", help="标记文件 review 状态")
+    p_mark.add_argument("file", help="文件相对路径")
+    p_mark.add_argument("status", choices=["auto", "reviewed", "corrupted"], help="新状态")
+    p_mark.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+
+    # review list
+    p_review_list = review_sub.add_parser("list", help="列出 review 状态")
+    p_review_list.add_argument("project_root", nargs="?", default=".", help="项目根目录")
+    p_review_list.add_argument("--status", choices=["auto", "reviewed", "corrupted"], help="按状态过滤")
+    p_review_list.add_argument("--json", action="store_true", help="输出 JSON 格式")
+
     # doctor
     p_doctor = subparsers.add_parser("doctor", help="检查环境依赖和索引健康状态")
     p_doctor.add_argument("project_root", nargs="?", default=".", help="项目根目录")
@@ -506,6 +573,14 @@ def _main() -> int:
             return cmd_session_list(args)
         else:
             p_session.print_help()
+            return 1
+    elif args.command == "review":
+        if args.review_command == "mark":
+            return cmd_review_mark(args)
+        elif args.review_command == "list":
+            return cmd_review_list(args)
+        else:
+            p_review.print_help()
             return 1
     elif args.command == "quickstart":
         return cmd_quickstart(args)

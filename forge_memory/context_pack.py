@@ -221,10 +221,11 @@ def _compute_quality_grade(context: Path, root: Path) -> dict:
     }
 
 
-def _read_index(context: Path) -> tuple[list[dict], list[dict]]:
-    """读取 index/files.jsonl 和 index/modules.jsonl。"""
+def _read_index(context: Path) -> tuple[list[dict], list[dict], list[dict]]:
+    """读取 index/files.jsonl、index/modules.jsonl 和 index/chunks.jsonl。过滤 corrupted 条目。"""
     files: list[dict] = []
     modules: list[dict] = []
+    chunks: list[dict] = []
 
     files_path = context / "index" / "files.jsonl"
     if files_path.exists():
@@ -232,7 +233,9 @@ def _read_index(context: Path) -> tuple[list[dict], list[dict]]:
             line = line.strip()
             if line:
                 try:
-                    files.append(json.loads(line))
+                    record = json.loads(line)
+                    if record.get("review_status") != "corrupted":
+                        files.append(record)
                 except json.JSONDecodeError:
                     continue
 
@@ -246,7 +249,17 @@ def _read_index(context: Path) -> tuple[list[dict], list[dict]]:
                 except json.JSONDecodeError:
                     continue
 
-    return files, modules
+    chunks_path = context / "index" / "chunks.jsonl"
+    if chunks_path.exists():
+        for line in chunks_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    chunks.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+    return files, modules, chunks
 
 
 def _score_file(
@@ -254,36 +267,69 @@ def _score_file(
     keywords: list[str],
     en_keywords: list[str],
     entry_files: list[str] | None,
-) -> float:
-    """为文件打相关性分。英文原始关键词权重高于翻译关键词。"""
+    file_chunks: list[dict] | None = None,
+) -> tuple[float, list[str]]:
+    """为文件打相关性分，返回 (score, match_reasons)。"""
     score = 0.0
+    reasons: list[str] = []
     path_lower = file_record["path"].lower()
     name_lower = file_record.get("name", "").lower()
     symbols = [s.lower() for s in file_record.get("symbols", [])]
     module = file_record.get("module", "").lower()
 
-    # 入口文件加分
     if entry_files and file_record["path"] in entry_files:
         score += 100.0
+        reasons.append("入口文件")
 
     for kw in keywords:
-        # 英文原始关键词权重更高
         weight = 1.5 if kw in en_keywords else 1.0
 
         if kw in path_lower:
             score += 10.0 * weight
+            if f"路径匹配 '{kw}'" not in reasons:
+                reasons.append(f"路径匹配 '{kw}'")
         if kw in name_lower:
             score += 8.0 * weight
+            if f"文件名匹配 '{kw}'" not in reasons:
+                reasons.append(f"文件名匹配 '{kw}'")
         if any(kw in s for s in symbols):
             score += 6.0 * weight
+            matched_sym = next(s for s in symbols if kw in s)
+            if f"符号匹配 '{matched_sym}'" not in reasons:
+                reasons.append(f"符号匹配 '{matched_sym}'")
         if kw in module:
             score += 4.0 * weight
+            if f"模块匹配 '{kw}'" not in reasons:
+                reasons.append(f"模块匹配 '{kw}'")
         if kw in file_record.get("heading", "").lower():
             score += 3.0 * weight
+            if f"标题匹配 '{kw}'" not in reasons:
+                reasons.append(f"标题匹配 '{kw}'")
         if kw in file_record.get("excerpt", "").lower():
             score += 2.0 * weight
+            if f"摘要匹配 '{kw}'" not in reasons:
+                reasons.append(f"摘要匹配 '{kw}'")
 
-    return score
+    # Chunk 级匹配：检查 docstring、TODO、function/class 名称
+    if file_chunks:
+        for chunk in file_chunks:
+            chunk_name_lower = chunk.get("name", "").lower()
+            chunk_summary_lower = chunk.get("summary", "").lower()
+            chunk_type = chunk.get("type", "")
+            for kw in keywords:
+                weight = 1.0
+                if kw in chunk_name_lower:
+                    score += 5.0 * weight
+                    reason = f"{chunk_type} '{chunk.get('name', '')}' 匹配 (L{chunk.get('line_start', '?')}-{chunk.get('line_end', '?')})"
+                    if reason not in reasons:
+                        reasons.append(reason)
+                elif kw in chunk_summary_lower and chunk_type in ("docstring", "todo"):
+                    score += 3.0 * weight
+                    reason = f"{chunk_type} 内容匹配 (L{chunk.get('line_start', '?')})"
+                    if reason not in reasons:
+                        reasons.append(reason)
+
+    return score, reasons
 
 
 def generate_context_pack(
@@ -295,19 +341,28 @@ def generate_context_pack(
     branch = current_branch(root)
     context = branch_context_path(root, branch)
     keywords = _extract_keywords(task)
-    # 提取英文原始关键词（用于加权评分）
     en_keywords = set(re.findall(r"[a-zA-Z_][\w]*", task.lower()))
-    files, modules = _read_index(context)
+    files, modules, chunks = _read_index(context)
 
     if not files:
         return "# Forge Memory Context Pack\n\n## Task\n\n" + task + "\n\n## Caveats\n\n- 未找到索引数据。请先运行 forge-memory scan。\n"
 
+    # 构建 chunks-by-file 索引
+    chunks_by_file: dict[str, list[dict]] = {}
+    for c in chunks:
+        fp = c.get("file_path", "")
+        if fp:
+            chunks_by_file.setdefault(fp, []).append(c)
+
     # 打分并排序
     scored = []
+    file_reasons: dict[str, list[str]] = {}
     for f in files:
-        score = _score_file(f, keywords, en_keywords, entry_files)
+        file_chunks = chunks_by_file.get(f["path"], [])
+        score, reasons = _score_file(f, keywords, en_keywords, entry_files, file_chunks)
         if score > 0:
             scored.append((score, f))
+            file_reasons[f["path"]] = reasons
     scored.sort(key=lambda x: x[0], reverse=True)
 
     related_files = [f for _, f in scored[:30]]
@@ -394,7 +449,9 @@ def generate_context_pack(
     if related_files:
         for f in related_files[:15]:
             role = ROLE_LABELS.get(f["role"], f["role"])
-            lines.append(f"- `{f['path']}` ({role})")
+            reasons = file_reasons.get(f["path"], [])
+            reason_str = "；".join(reasons[:3]) if reasons else "无明确匹配"
+            lines.append(f"- `{f['path']}` ({role}) — 匹配原因：{reason_str}")
     else:
         lines.append("- 未找到明显相关文件。")
 
@@ -490,5 +547,21 @@ def generate_context_pack(
     lines.append("")
     lines.append("- 本上下文包基于轻量索引匹配生成，不替代源码级验证。")
     lines.append("- import 关系可能包含未解析的外部包。")
+
+    # 质量门禁：confidence=low 且无高分入口文件时拒绝输出
+    if confidence["overall"] == "low" and not entry_files:
+        top_score = scored[0][0] if scored else 0
+        if top_score < 20:
+            return (
+                "# Forge Memory Context Pack\n\n"
+                f"## Task\n\n{task}\n\n"
+                "## Error\n\n"
+                "> **质量门禁拦截**: 置信度为 low 且无明确入口文件匹配。\n"
+                "> 任务描述过于模糊或与项目索引不匹配，无法生成有价值的上下文包。\n\n"
+                "**建议**:\n"
+                "- 提供更具体的任务描述（包含文件名、函数名或模块名）\n"
+                "- 使用 `--entry` 参数指定入口文件\n"
+                "- 运行 `forge-memory scan` 更新索引\n"
+            )
 
     return "\n".join(lines) + "\n"

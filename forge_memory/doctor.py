@@ -143,6 +143,73 @@ def check_index(root: Path) -> list[dict]:
             "message": "可选：运行 import-db 创建",
         })
 
+    # Review 状态分布
+    if files_path.exists():
+        review_counts = {"auto": 0, "reviewed": 0, "corrupted": 0}
+        total_files = 0
+        for line in files_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    rec = json.loads(line)
+                    total_files += 1
+                    status = rec.get("review_status", "auto")
+                    if status in review_counts:
+                        review_counts[status] += 1
+                    else:
+                        review_counts["auto"] += 1
+                except json.JSONDecodeError:
+                    continue
+        if total_files > 0:
+            corrupted_ratio = review_counts["corrupted"] / total_files
+            status = "warning" if corrupted_ratio > 0.1 else "ok"
+            checks.append({
+                "name": "review_status 分布",
+                "status": status,
+                "value": f"auto: {review_counts['auto']}, reviewed: {review_counts['reviewed']}, corrupted: {review_counts['corrupted']}",
+                "message": "" if status == "ok" else f"corrupted 占比 {corrupted_ratio:.0%}，建议检查",
+            })
+
+    # Chunk 覆盖率
+    chunks_path = branch_dir / "index" / "chunks.jsonl"
+    if files_path.exists() and chunks_path.exists():
+        source_count = 0
+        for line in files_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    rec = json.loads(line)
+                    if rec.get("role") == "source":
+                        source_count += 1
+                except json.JSONDecodeError:
+                    continue
+        chunk_count = sum(1 for l in chunks_path.read_text(encoding="utf-8").splitlines() if l.strip())
+        coverage = chunk_count / max(source_count, 1)
+        status = "ok" if coverage >= 1 else "warning" if coverage >= 0.5 else "error"
+        checks.append({
+            "name": "chunk 覆盖率",
+            "status": status,
+            "value": f"{chunk_count} chunks / {source_count} source files ({coverage:.1f} chunks/file)",
+            "message": "" if status == "ok" else "部分源码文件缺少 chunk 元数据",
+        })
+    elif files_path.exists():
+        checks.append({
+            "name": "chunks.jsonl",
+            "status": "info",
+            "value": "不存在",
+            "message": "运行 scan 生成 chunk 元数据",
+        })
+
+    # Provenance 完整度（检查 context pack 是否有匹配原因）
+    pack_path = branch_dir / "packs" / "latest-context-pack.md"
+    if pack_path.exists():
+        pack_text = pack_path.read_text(encoding="utf-8")
+        has_reasons = "匹配原因" in pack_text
+        checks.append({
+            "name": "provenance 完整度",
+            "status": "ok" if has_reasons else "warning",
+            "value": "含匹配原因" if has_reasons else "无匹配原因",
+            "message": "" if has_reasons else "重新运行 context 命令以生成带匹配原因的上下文包",
+        })
+
     return checks
 
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.4.8 (2026-07-13)
+
+Upload Brain 理念融入：chunk 级元数据、review 状态治理、静态质量门禁。
+
+### 新增
+- `chunker.py`：从源码提取函数/类/docstring/TODO chunk，附带行范围和内容 hash
+- `review.py`：索引条目 review 状态管理（auto/reviewed/corrupted）
+- `forge-memory review mark` 命令：标记文件 review 状态
+- `forge-memory review list` 命令：查看 review 状态分布
+- `index/chunks.jsonl`：chunk 级元数据存储
+- `files.jsonl` 新增 `chunk_count` 和 `review_status` 字段
+- `context_pack.py`：匹配原因（文件级 + chunk 级）、corrupted 过滤、质量门禁
+- `doctor.py`：review 状态分布、chunk 覆盖率、provenance 完整度指标
+
+### 改进
+- context pack 每条推荐文件附带匹配原因（路径/文件名/符号/模块/标题/摘要 + chunk 级 function/docstring/todo）
+- corrupted 标记的文件自动从 context pack 中过滤
+- 置信度为 low 且无入口文件时，context pack 拒绝输出并给出修复建议
+- `references/schema.md` 更新 chunks.jsonl 和 review_status 文档
+
 ## v0.4.7 (2026-07-07)
 
 可靠性提升与渐进式引导：错误处理全面升级、扫描进度反馈、FAQ 与反模式文档独立、命令后动态下一步提示。
